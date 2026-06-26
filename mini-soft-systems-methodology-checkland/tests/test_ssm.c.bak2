@@ -1,0 +1,220 @@
+#include "ssm_core.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+#include <assert.h>
+#define EPS 1e-9
+static int p=0,f=0;
+#define T(n,e) do{if(e)p++;else{f++;fprintf(stderr,"FAIL: %s\n",n);}}while(0)
+
+int main(void){
+printf("=== SSM Test Suite ===\n\n");
+
+/* CATWOE */
+CATWOE* c=ssm_catwoe_create();
+T("catwoe_create",c!=NULL);
+ssm_catwoe_set_customer(c,"Patients");
+T("catwoe_cust",c->customers&&strcmp(c->customers,"Patients")==0);
+ssm_catwoe_add_customer(c,"Staff");
+T("catwoe_add_cust",c->n_customer_types==1);
+ssm_catwoe_set_actor(c,"Nurses");
+T("catwoe_actor",c->actors&&strcmp(c->actors,"Nurses")==0);
+ssm_catwoe_set_transformation(c,"sick","healthy",SSM_TRANSFORM_CONCRETE);
+T("catwoe_transform",c->transformation_input&&c->transformation_output);
+ssm_catwoe_set_worldview(c,"Patient-centered care");
+T("catwoe_w",c->weltanschauung!=NULL);
+ssm_catwoe_add_constraint(c,"Budget limit");
+T("catwoe_constraint",c->n_constraints==1);
+ssm_catwoe_set_efficacy(c,0.8);
+T("catwoe_efficacy",fabs(c->efficacy_criterion-0.8)<EPS);
+double comp_score=ssm_catwoe_completeness(c);
+T("catwoe_completeness>0",comp_score>0.0);
+T("catwoe_well_formulated",ssm_catwoe_is_well_formulated(c));
+
+/* Weltanschauung */
+Weltanschauung* w1=ssm_weltanschauung_create("Clinical","Medical model");
+ssm_w_add_assumption(w1,"Health is absence of disease");
+ssm_w_add_assumption(w1,"Expertise resides in professionals");
+T("w1_assumptions",w1->n_assumptions==2);
+Weltanschauung* w2=ssm_weltanschauung_create("Social","Social determinants");
+ssm_w_add_assumption(w2,"Health is social wellbeing");
+ssm_w_add_assumption(w2,"Expertise is distributed");
+double conflict=ssm_w_conflict_score(w1,w2);
+T("w_conflict_in_range",conflict>=0.0&&conflict<=1.0);
+double accom=ssm_w_accommodation_potential(w1,w2);
+T("w_accom_in_range",accom>=0.0&&accom<=1.0);
+
+/* Root Definition */
+RootDefinition* rd=ssm_rootdef_create("Healthcare",SSM_RD_PRIMARY_TASK);
+ssm_rootdef_set_pqr(rd,"provide healthcare","nursing and medicine","improve health");
+T("rd_pqr",rd->what_to_do&&rd->how_to_do&&rd->why_do_it);
+ssm_rootdef_set_efficacy(rd,0.9);
+ssm_rootdef_set_efficiency(rd,0.7);
+ssm_rootdef_set_effectiveness(rd,0.8);
+ssm_rootdef_set_ethicality(rd,0.8);
+ssm_rootdef_set_elegance(rd,0.6);
+T("rd_viable",ssm_rootdef_is_viable(rd));
+double e5=ssm_rootdef_5e_composite(rd);
+T("rd_5e_composite",e5>=0.0&&e5<=1.0);
+ssm_rootdef_set_catwoe(rd,c);
+
+/* Conceptual Model */
+ConceptualModel* cm=ssm_conceptual_create("Test RD");
+int a0=ssm_conceptual_add_activity(cm,"Assess patient","Initial diagnosis");
+int a1=ssm_conceptual_add_activity(cm,"Treat patient","Medical intervention");
+int a2=ssm_conceptual_add_activity(cm,"Monitor recovery","Follow-up care");
+T("cm_activities",cm->n_activities==3);
+ssm_conceptual_add_dependency(cm,a0,a1);
+ssm_conceptual_add_dependency(cm,a1,a2);
+T("cm_connected",ssm_conceptual_is_connected(cm));
+double cov=ssm_conceptual_coverage(cm);
+T("cm_coverage",cov>=0.0);
+ssm_activity_add_indicator(cm->activities[a0],"completion_rate",0.95);
+T("cm_indicator",cm->activities[a0]->n_indicators==1);
+
+/* Problem Situation */
+ProblemSituation* ps=ssm_situation_create("Ward X");
+ssm_situation_add_stakeholder(ps,"Patients");
+ssm_situation_add_stakeholder(ps,"Nurses");
+ssm_situation_add_stakeholder(ps,"Management");
+ssm_situation_add_issue(ps,"Long waiting times");
+ssm_situation_add_issue(ps,"Staff burnout");
+T("ps_stakeholders",ps->n_stakeholders==3);
+T("ps_issues",ps->n_issues==2);
+double cx=ssm_situation_complexity(ps);
+T("ps_complexity",cx>=0.0);
+ssm_situation_add_worldview(ps,w1);
+ssm_situation_add_worldview(ps,w2);
+double cl=ssm_situation_conflict_level(ps);
+T("ps_conflict_valid",cl>=0.0&&cl<=1.0);
+
+/* Comparison */
+Comparison* comp=ssm_comparison_create("Healthcare_model","Ward X",SSM_COMPARE_MATRIX);
+ssm_comparison_add_gap(comp,a0,"No formal assessment",0.6,true,false);
+ssm_comparison_add_gap(comp,a1,"Treatment exists but slow",0.4,true,true);
+ssm_comparison_add_gap(comp,a2,"No systematic monitoring",0.8,false,false);
+T("comp_gaps",comp->n_gaps==3);
+double align=ssm_comparison_compute_alignment(comp);
+T("comp_alignment",align>=0.0&&align<=1.0);
+
+/* SSM Cycle */
+SSMCycle* cycle=ssm_cycle_create();
+T("cycle_create",cycle!=NULL);
+T("cycle_stage_1",cycle->current_stage==SSM_STAGE_1_SITUATION);
+ssm_cycle_advance(cycle);
+T("cycle_advance",cycle->current_stage==SSM_STAGE_2_EXPRESSION);
+ssm_cycle_add_learning(cycle,"Multiple worldviews identified");
+ssm_cycle_add_rootdef(cycle,rd);
+ssm_cycle_add_model(cycle,cm);
+ssm_cycle_add_comparison(cycle,comp);
+T("cycle_additions",cycle->n_root_defs==1&&cycle->n_models==1);
+ssm_cycle_advance(cycle);ssm_cycle_advance(cycle);
+ssm_cycle_advance(cycle);ssm_cycle_advance(cycle);
+T("cycle_stage_6",cycle->current_stage==SSM_STAGE_6_CHANGES);
+double acc=ssm_accommodation_index(cycle);
+T("accom_index_valid",acc>=0.0&&acc<=1.0);
+
+/* NULL safety */
+ssm_catwoe_free(NULL);ssm_weltanschauung_free(NULL);ssm_rootdef_free(NULL);
+ssm_conceptual_free(NULL);ssm_situation_free(NULL);ssm_comparison_free(NULL);ssm_cycle_free(NULL);
+T("null_safety",1);
+
+ssm_weltanschauung_free(w1);ssm_weltanschauung_free(w2);
+ssm_rootdef_free(rd);ssm_conceptual_free(cm);
+ssm_situation_free(ps);
+ssm_comparison_free(comp);ssm_cycle_free(cycle);
+
+printf("\n=== %d passed, %d failed ===\n",p,f);
+return f>0?1:0;
+}
+
+/* Extended tests */
+RichPicture* rp = ssm_rich_picture_create("Hospital Flow");
+T("rp_create", rp != NULL);
+int n0 = ssm_rp_add_node(rp, "Hospital", SSM_ELEM_STRUCTURE, 0.5, 0.1);
+int n1 = ssm_rp_add_node(rp, "Patients", SSM_ELEM_CONCERN, 0.3, 0.5);
+int n2 = ssm_rp_add_node(rp, "Referral flow", SSM_ELEM_PROCESS, 0.7, 0.5);
+int n3 = ssm_rp_add_node(rp, "Waiting list conflict", SSM_ELEM_CONFLICT, 0.5, 0.8);
+T("rp_nodes", rp->n_nodes == 4);
+ssm_rp_connect(rp, n1, n2); ssm_rp_connect(rp, n2, n0);
+ssm_rp_connect(rp, n3, n1); ssm_rp_connect(rp, n3, n2);
+ssm_rp_set_salience(rp, n3, 0.9);
+double rp_cx = ssm_rp_compute_complexity(rp);
+T("rp_complexity", rp_cx >= 0.0);
+double rp_cd = ssm_rp_compute_conflict_density(rp);
+T("rp_conflict", rp_cd >= 0.0);
+ssm_rich_picture_free(rp);
+
+SocialSystemAnalysis* ssa = ssm_social_create("Ward Culture");
+T("ssa_create", ssa != NULL);
+int r0 = ssm_social_add_role(ssa, "Nurse", "Direct patient care");
+int r1 = ssm_social_add_role(ssa, "Doctor", "Diagnosis and treatment");
+ssm_social_add_role_holder(ssa, r0, "Senior Nurse");
+ssm_social_add_role_holder(ssa, r0, "Junior Nurse");
+ssm_social_add_norm(ssa, r0, "Follow protocols");
+ssm_social_add_norm(ssa, r0, "Compassionate care");
+ssm_social_add_norm(ssa, r1, "Evidence-based practice");
+ssm_social_add_value(ssa, r0, "Patient safety");
+ssm_social_add_value(ssa, r1, "Clinical excellence");
+T("ssa_roles", ssa->n_roles == 2);
+double scoh = ssm_social_compute_cohesion(ssa);
+T("ssa_cohesion", scoh >= 0.0);
+double snc = ssm_social_compute_normative_conflict(ssa);
+T("ssa_conflict", snc >= 0.0);
+ssm_social_free(ssa);
+
+PoliticalSystemAnalysis* psa = ssm_political_create("Power Dynamics");
+T("psa_create", psa != NULL);
+int c0 = ssm_political_add_commodity(psa, SSM_COMM_AUTHORITY, "Clinical authority", "Senior Doctors");
+int c1 = ssm_political_add_commodity(psa, SSM_COMM_RESOURCES, "Budget control", "Hospital Management");
+ssm_political_add_secondary_holder(psa, c0, "Nurse Practitioners");
+ssm_political_add_power_struggle(psa, "Budget allocation conflict");
+ssm_political_add_strategy(psa, "Joint budget committee");
+T("psa_commodities", psa->n_commodities == 2);
+double pc = ssm_political_compute_concentration(psa);
+T("psa_concentration", pc >= 0.0);
+double pf = ssm_political_compute_feasibility(psa);
+T("psa_feasibility", pf >= 0.0);
+ssm_political_free(psa);
+
+InterventionPlan* ip = ssm_intervention_create("Reduce Waiting Times");
+T("ip_create", ip != NULL);
+ssm_intervention_add_change(ip, "Streamline triage", SSM_CHANGE_PROCEDURAL, 0.9, 0.7);
+ssm_intervention_add_change(ip, "Hire more nurses", SSM_CHANGE_STRUCTURAL, 0.8, 0.4);
+ssm_intervention_add_change(ip, "Implement digital booking", SSM_CHANGE_SYSTEMIC, 0.7, 0.6);
+T("ip_changes", ip->n_changes == 3);
+double prio = ssm_intervention_compute_priority(ip);
+T("ip_priority", prio >= 0.0);
+T("ip_actionable", ssm_intervention_is_actionable(ip));
+ssm_intervention_free(ip);
+
+SSMEvaluation* ev = ssm_evaluation_create("Waiting Times Intervention");
+ssm_eval_add_metric(ev, "Average wait (days)", 45.0, 28.0, "Monthly audit data");
+ssm_eval_add_metric(ev, "Patient satisfaction", 0.6, 0.8, "Survey N=500");
+ssm_eval_add_metric(ev, "Staff overtime (hours)", 120.0, 80.0, "HR records");
+T("ev_metrics", ev->n_metrics == 3);
+double imp = ssm_eval_compute_improvement(ev);
+T("ev_improvement", imp > 0.0);
+ssm_evaluation_free(ev);
+
+SSMFeedbackSummary* fs = ssm_feedback_create("Post-intervention");
+ssm_feedback_add_stakeholder(fs, "Patients", 0.8, 0.7);
+ssm_feedback_add_stakeholder(fs, "Nurses", 0.6, 0.5);
+ssm_feedback_add_stakeholder(fs, "Doctors", 0.7, 0.6);
+T("fs_stakeholders", fs->n_feedback == 3);
+double sat = ssm_feedback_compute_satisfaction(fs);
+T("fs_satisfaction", sat >= 0.0);
+double leg = ssm_feedback_compute_legitimacy(fs);
+T("fs_legitimacy", leg >= 0.0);
+ssm_feedback_free(fs);
+
+LearningHistory* lh = ssm_history_create(1);
+ssm_history_add_insight(lh, "Multi-stakeholder workshops increased mutual understanding");
+ssm_history_add_insight(lh, "Visual tools (rich pictures) helped surface hidden assumptions");
+ssm_history_record_accommodation(lh, 0.65);
+T("lh_insights", lh->n_insights == 2);
+T("lh_improving", ssm_history_is_improving(lh));
+ssm_history_free(lh);
+
+printf("\n=== Extended tests: %d passed, %d failed ===\n", p, f);
